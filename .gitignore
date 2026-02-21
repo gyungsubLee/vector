@@ -88,3 +88,7 @@ logs/
 .cache/
 *.cache/
 03. Image embedding 이론(시연파일)/shoe/
+
+
+# data
+03-Image_embedding_실습/03.Image_embedding_data
