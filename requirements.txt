@@ -100,11 +100,11 @@ jupyterlab-widgets==3.0.9
 jupyterlab_pygments==0.3.0
 jupyterlab_server==2.25.2
 kiwisolver==1.4.5
-langchain==0.0.352
-langchain-community==0.0.16
-langchain-core==0.1.16
-langcodes==3.3.0
-langsmith==0.0.83
+langchain>=0.2.0
+langchain-community>=0.2.0
+langchain-core>=0.2.0
+langchain-openai
+langchain-pinecone
 lazy_loader==0.3
 llama-index==0.10.25
 llama-index-agent-openai==0.2.1
