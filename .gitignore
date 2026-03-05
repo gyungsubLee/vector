@@ -91,4 +91,10 @@ logs/
 
 
 # data
+05.VectorDB_Advanced/Multimodal/data/**
+05.VectorDB_Advanced/Multimodal/lancedb/
+
 03-Image_embedding_실습/03.Image_embedding_data
+
+**/lancedb/**
+**/data/**

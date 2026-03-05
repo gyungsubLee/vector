@@ -8,8 +8,31 @@ from ultralytics.utils.metrics import mask_iou
 import itertools
 import matplotlib.image as mpimg
 
+# Constants
+WARNING_FILTER_ACTION = "ignore"
+DEFAULT_IMAGE_BASE_PATH = "./data/imaterialist-fashion-2020-fgvc7/train"
+TRAIN_CSV_PATH = "./data/imaterialist-fashion-2020-fgvc7/train.csv"
+OUTPUT_FILE_PATH = "./data/outputs.json"
+IMAGE_EXTENSION = ".jpg"
+MASK_RESHAPE_ORDER = "F"
+MASK_DTYPE = torch.float32
+DEFAULT_OVERLAP_THRESHOLD = 0.9
+NO_OVERLAP_IOU = 0
+PAIR_COMBINATION_SIZE = 2
+ATTRIBUTE_SEPARATOR = ","
+EMPTY_ATTRIBUTE = ""
+BATCH_IMAGE_WINDOW = 3
+DEFAULT_BATCH_SIZE = 20
+MAIN_BATCH_SIZE = 5
+OUTPUT_JSON_ORIENT = "records"
+FILE_WRITE_MODE_APPEND = "a"
+FILE_WRITE_MODE_TRUNCATE = "w"
+OUTPUT_LINE_BREAK = "\n"
+TQDM_DESC = "Processing Batches"
+START_MESSAGE = "Start process"
+
 # Ignore warnings
-warnings.filterwarnings('ignore')
+warnings.filterwarnings(WARNING_FILTER_ACTION)
 
 def create_separate_masks(annoations, class_ids, height, width):
     masks = []
@@ -24,7 +47,7 @@ def create_separate_masks(annoations, class_ids, height, width):
             pixel_start = int(pixel_start) - 1
             run_length = int(run_length)
             mask[pixel_start:pixel_start+run_length] = 1
-        masks.append(mask.reshape((height, width), order='F'))
+        masks.append(mask.reshape((height, width), order=MASK_RESHAPE_ORDER))
     return masks
 
 def flatten_mask(mask):
@@ -32,16 +55,16 @@ def flatten_mask(mask):
     flattened_mask = mask.flatten()
     mask_tensor = np.reshape(flattened_mask, (1, -1))
 
-    mask_tensor = torch.tensor(mask_tensor, dtype=torch.float32)
+    mask_tensor = torch.tensor(mask_tensor, dtype=MASK_DTYPE)
     return mask_tensor
 
-def check_overlap(mask1, mask2, threshold=0.9):
+def check_overlap(mask1, mask2, threshold=DEFAULT_OVERLAP_THRESHOLD):
     """
     Determine if the overlap between two masks covers more than `threshold` of the smaller mask.
     """
     # Calculate IoU using the mask_iou function
     iou = mask_iou(mask1, mask2).item()
-    if iou==0:
+    if iou == NO_OVERLAP_IOU:
         return False
     
     # Calculate the areas of the masks
@@ -60,13 +83,15 @@ def check_overlap(mask1, mask2, threshold=0.9):
     else:
         return False
     
-def search_attribute_pairs(tmp_df, image_base_path='imaterialist-fashion-2020-fgvc7/train'):
+def search_attribute_pairs(tmp_df, image_base_path=DEFAULT_IMAGE_BASE_PATH):
     tmp = tmp_df.reset_index(drop=True).copy()
-    image = mpimg.imread(os.path.join(image_base_path, tmp.ImageId.unique()[0]+'.jpg'))
+    image = mpimg.imread(
+        os.path.join(image_base_path, tmp.ImageId.unique()[0] + IMAGE_EXTENSION)
+    )
     # binary mask 생성
     masks = create_separate_masks(tmp['EncodedPixels'], tmp['ClassId'], tmp['Height'].values[0], tmp['Width'].values[0])
 
-    combinations = list(itertools.combinations(range(len(masks)), 2))
+    combinations = list(itertools.combinations(range(len(masks)), PAIR_COMBINATION_SIZE))
 
     pairs = list()
 
@@ -90,19 +115,21 @@ def search_attribute_pairs(tmp_df, image_base_path='imaterialist-fashion-2020-fg
 def merge_attribute_pairs(tmp_df, pairs):
     tmp = tmp_df.reset_index(drop=True).copy()
     # attribute이 없는 경우도 존재하기 때문에, string 값으로 변환
-    tmp.loc[tmp['AttributesIds'].isna(), 'AttributesIds'] = ''
+    tmp.loc[tmp['AttributesIds'].isna(), 'AttributesIds'] = EMPTY_ATTRIBUTE
     main_pairs = list(set([i[0] for i in pairs]))
 
     for mp in main_pairs:
         # 상위 카테고리가 포함된 pair 선택
-        pair = [i[1] for i in pairs if i[0]==mp]
+        pair = [i[1] for i in pairs if i[0] == mp]
         # 상위 카테고리를 제외한 다른 id만 선택 == 하위 카테고리
         flat_pair = list(set([element for tuple_ in pair for element in tuple_]))
-        sub_category = [i for i in flat_pair if i!=mp]
+        sub_category = [i for i in flat_pair if i != mp]
         # 하위 카테고리들의 attribute를 하나로 병합
         sub_attributes = tmp.loc[sub_category, 'AttributesIds'].values
-        sub_attributes = list(set(','.join(sub_attributes).split(',')))
-        sub_attributes = ','.join(sub_attributes)
+        sub_attributes = list(
+            set(ATTRIBUTE_SEPARATOR.join(sub_attributes).split(ATTRIBUTE_SEPARATOR))
+        )
+        sub_attributes = ATTRIBUTE_SEPARATOR.join(sub_attributes)
         # 상위 카테고리의 second attribute로 저장
         tmp.loc[mp, 'second_AttributesIds'] = sub_attributes
 
@@ -112,7 +139,7 @@ def merge_attribute_pairs(tmp_df, pairs):
 def divide_into_batches(dataframe, batch_size):
     """Yield successive n-sized chunks from dataframe."""
     images = dataframe['ImageId'].unique()
-    batches = [images[i:i+3] for i in range(0, len(images), batch_size)]
+    batches = [images[i:i + BATCH_IMAGE_WINDOW] for i in range(0, len(images), batch_size)]
 
     for batch in batches:
         yield dataframe.loc[dataframe['ImageId'].isin(batch)]
@@ -121,10 +148,10 @@ def divide_into_batches(dataframe, batch_size):
 def process_and_append_to_file(batch, image_base_path, output_file):
     processed_batch = [process_per_image((image, batch, image_base_path)) for image in batch['ImageId'].unique()]
     # Convert each DataFrame in processed_batch to a line-delimited JSON string
-    with open(output_file, 'a') as f_out:
+    with open(output_file, FILE_WRITE_MODE_APPEND) as f_out:
         for df in processed_batch:
-            json_string = df.to_json(orient='records')
-            f_out.write(json_string + '\n')  # Write each batch as a new line
+            json_string = df.to_json(orient=OUTPUT_JSON_ORIENT)
+            f_out.write(json_string + OUTPUT_LINE_BREAK)  # Write each batch as a new line
 
 def process_per_image(args):
     image, anno, image_base_path = args
@@ -138,21 +165,21 @@ def process_per_image(args):
         tmp_df = merge_attribute_pairs(tmp_df, pairs)
     return tmp_df
 
-def parallel_process_images(anno, image_base_path, output_file, batch_size=20):
+def parallel_process_images(anno, image_base_path, output_file, batch_size=DEFAULT_BATCH_SIZE):
     batches = list(divide_into_batches(anno, batch_size))
-    for batch in tqdm(batches, desc="Processing Batches"):
+    for batch in tqdm(batches, desc=TQDM_DESC):
         process_and_append_to_file(batch, image_base_path, output_file)
 
 if __name__ == "__main__":
-    anno = pd.read_csv('imaterialist-fashion-2020-fgvc7/train.csv')
+    anno = pd.read_csv(TRAIN_CSV_PATH)
 
     # Specify the image base path if different from the default
-    image_base_path = 'imaterialist-fashion-2020-fgvc7/train'
+    image_base_path = DEFAULT_IMAGE_BASE_PATH
 
-    output_file = "outputs2.json"
+    output_file = OUTPUT_FILE_PATH
 
-    open(output_file, 'w').close()
-    print("Start process")
-    parallel_process_images(anno, image_base_path, output_file, batch_size=5)
+    open(output_file, FILE_WRITE_MODE_TRUNCATE).close()
+    print(START_MESSAGE)
+    parallel_process_images(anno, image_base_path, output_file, batch_size=MAIN_BATCH_SIZE)
 
     # new_anno.to_csv("imaterialist-fashion-2020-fgvc7/new_annotations.csv", index=False)
